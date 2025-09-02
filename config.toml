@@ -1,6 +1,6 @@
 enable-magisk-update = true
 
-GLOBAL SELECTIONS
+# GLOBAL SELECTIONS
 
 
 parallel-jobs = 1
