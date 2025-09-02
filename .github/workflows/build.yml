@@ -11,7 +11,11 @@ on:
 
 jobs:
   run:
-    permissions: write-all
+    permissions:
+      contents: write
+      actions: read
+      packages: read
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-java@v4
@@ -24,6 +28,16 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Update config
         if: ${{ inputs.from_ci }}
@@ -44,8 +58,73 @@ jobs:
           if [ -z "$TAG" ]; then TAG=0; fi
           echo "NEXT_VER_CODE=$((TAG + 1))" >> $GITHUB_OUTPUT
 
+      - name: Get patches repository info
+        id: patches_info
+        env:
+          GH_TOKEN: ${{ secrets.PITHUB_TOKEN }}
+        run: |
+          # Function to extract repo info with fallbacks
+          get_patches_repo() {
+            local repo=""
+            
+            # Try config.toml first
+            if [ -f "config.toml" ]; then
+              repo=$(grep -E '^patches\s*=' config.toml | head -1 | awk -F'"' '{print $2}')
+            fi
+            
+            # Try config.json if not found
+            if [ -z "$repo" ] && [ -f "config.json" ]; then
+              repo=$(jq -r '.patches // empty' config.json 2>/dev/null || echo "")
+            fi
+            
+            # Default fallback
+            if [ -z "$repo" ]; then
+              repo="anddea/revanced-patches"
+            fi
+            
+            echo "$repo"
+          }
+          
+          # Function to get patch version with multiple fallbacks
+          get_patch_version() {
+            local repo="$1"
+            local version=""
+            
+            # Try latest release
+            version=$(gh api "repos/$repo/releases/latest" --jq '.tag_name // .name' 2>/dev/null || echo "")
+            
+            # Try latest tag if no release
+            if [ -z "$version" ]; then
+              version=$(gh api "repos/$repo/tags" --jq '.[0].name' 2>/dev/null || echo "")
+            fi
+            
+            # Use commit SHA as final fallback
+            if [ -z "$version" ]; then
+              DEFAULT_BRANCH=$(gh api "repos/$repo" --jq '.default_branch' 2>/dev/null || echo "main")
+              version=$(gh api "repos/$repo/branches/$DEFAULT_BRANCH" --jq '.commit.sha' 2>/dev/null | cut -c1-7 || echo "unknown")
+            fi
+            
+            echo "$version"
+          }
+          
+          PATCHES_REPO=$(get_patches_repo)
+          REPO_OWNER=$(echo "$PATCHES_REPO" | cut -d'/' -f1)
+          REPO_NAME=$(echo "$PATCHES_REPO" | cut -d'/' -f2)
+          PATCH_VERSION=$(get_patch_version "$PATCHES_REPO")
+          
+          echo "REPO_OWNER=$REPO_OWNER" >> $GITHUB_OUTPUT
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "PATCH_VERSION=$PATCH_VERSION" >> $GITHUB_OUTPUT
+          echo "DEV_NAME=$REPO_OWNER" >> $GITHUB_OUTPUT
+          echo "PATCHES_REPO=$PATCHES_REPO" >> $GITHUB_OUTPUT
+
       - name: Build modules/APKs
-        run: if [ -f "config.json" ]; then ./build.sh config.json; else ./build.sh config.toml; fi
+        run: |
+          if [ -f "config.json" ]; then
+            ./build.sh config.json || exit 1
+          else
+            ./build.sh config.toml || exit 1
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.PITHUB_TOKEN }}
           GITHUB_REPOSITORY: $GITHUB_REPOSITORY
@@ -112,19 +191,36 @@ jobs:
           POCKETBASE_URL: ${{ secrets.POCKETBASE_URL }}
           POCKETBASE_EMAIL: ${{ secrets.POCKETBASE_EMAIL }}
           POCKETBASE_PASSWORD: ${{ secrets.POCKETBASE_PASSWORD }}
-          PATCH_VERSION: ${{ secrets.PATCH_VERSION }}  # e.g., "3.12.0"
-          DEV_NAME: ${{ secrets.DEV_NAME }}  # e.g., "anddea"
+          DEV_NAME: ${{ steps.patches_info.outputs.DEV_NAME }}
+          PATCH_VERSION: ${{ steps.patches_info.outputs.PATCH_VERSION }}
         if: env.POCKETBASE_URL != null
         run: |
           cd build || { echo "build folder not found"; exit 1; }
           
+          echo "Using dev: $DEV_NAME"
+          echo "Using patch version: $PATCH_VERSION"
+          
           # Function to authenticate with PocketBase
           authenticate_pocketbase() {
-            local auth_response=$(curl -s -X POST "${POCKETBASE_URL}/api/collections/users/auth-with-password" \
-              -H "Content-Type: application/json" \
-              -d "{\"identity\":\"${POCKETBASE_EMAIL}\",\"password\":\"${POCKETBASE_PASSWORD}\"}")
+            local max_retries=3
+            local retry_count=0
             
-            echo "$auth_response" | jq -r '.token // empty'
+            while [ $retry_count -lt $max_retries ]; do
+              local auth_response=$(curl -s -f -X POST "${POCKETBASE_URL}/api/collections/users/auth-with-password" \
+                -H "Content-Type: application/json" \
+                -d "{\"identity\":\"${POCKETBASE_EMAIL}\",\"password\":\"${POCKETBASE_PASSWORD}\"}")
+              
+              if [ $? -eq 0 ] && [ -n "$(echo "$auth_response" | jq -r '.token // empty')" ]; then
+                echo "$auth_response" | jq -r '.token'
+                return 0
+              fi
+              
+              retry_count=$((retry_count + 1))
+              sleep 2
+            done
+            
+            echo "Failed to authenticate after $max_retries attempts" >&2
+            return 1
           }
           
           # Get auth token
@@ -136,7 +232,7 @@ jobs:
           
           # Function to get apps from PocketBase
           get_apps() {
-            curl -s -X GET "${POCKETBASE_URL}/api/collections/apps/records" \
+            curl -s -f -X GET "${POCKETBASE_URL}/api/collections/apps/records" \
               -H "Authorization: Bearer $TOKEN"
           }
           
@@ -163,7 +259,7 @@ jobs:
           EOF
             )
             
-            curl -s -X POST "${POCKETBASE_URL}/api/collections/versions/records" \
+            curl -s -f -X POST "${POCKETBASE_URL}/api/collections/versions/records" \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer $TOKEN" \
               -d "$version_data"
@@ -172,17 +268,24 @@ jobs:
           # Function to extract version from filename
           extract_version() {
             local filename="$1"
-            # Extract version pattern like v19.47.53 or 19.47.53
-            echo "$filename" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | head -1
+            # Try multiple patterns for version extraction
+            local version=$(echo "$filename" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^v//')
+            
+            # If no version found, try other patterns
+            if [ -z "$version" ]; then
+              version=$(echo "$filename" | grep -oE '[0-9]+_[0-9]+_[0-9]+' | head -1 | tr '_' '.')
+            fi
+            
+            echo "$version"
           }
           
           # Function to determine if file is root version
           is_root_version() {
             local filename="$1"
             if [[ $filename == *root* ]] || [[ $filename == *magisk* ]] || [[ $filename == *.zip ]]; then
-              return 0  # true
+              echo "true"
             else
-              return 1  # false
+              echo "false"
             fi
           }
           
@@ -273,6 +376,7 @@ jobs:
             VERSION=$(extract_version "$OUTPUT")
             [ -z "$VERSION" ] && continue
             
+            IS_ROOT=$(is_root_version "$OUTPUT")
             BASE_APP_NAME=$(get_app_name "$OUTPUT" "$IS_ROOT")
             [ "$BASE_APP_NAME" = "Unknown" ] && continue
             
@@ -373,7 +477,14 @@ jobs:
           MODULES=${MODULES#"$NL"}
           APKS=${APKS#"$NL"}
 
-          BODY="$(sed 's/^\* \*\*/↪ \*\*/g; s/^\* `/↪ \*\*/g; s/`/\*/g; s/^\* /\↪/g; s/\*\*/\*/g; s/###//g; s/^- /↪ /g; /^==/d;' ../build.md)"
+          BODY=$(awk '
+            /^\* \*\*/ {sub(/^\* \*\*/, "↪ *"); print; next}
+            /^\* `/ {sub(/^\* `/, "↪ *"); gsub(/`/, "*"); print; next}
+            /^\* / {sub(/^\* /, "↪ "); print; next}
+            /^==/ {next}
+            {print}
+          ' ../build.md)
+          
           MSG="*New build!*
 
           ${BODY}
@@ -389,3 +500,13 @@ jobs:
           MSG=${MSG:0:9450}
           POST="https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
           curl -X POST --data-urlencode "parse_mode=Markdown" --data-urlencode "disable_web_page_preview=true" --data-urlencode "text=${MSG}" --data-urlencode "chat_id=${TG_CHAT}" "$POST"
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Version Code: ${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Patch Version: ${{ steps.patches_info.outputs.PATCH_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Patches Repository: ${{ steps.patches_info.outputs.PATCHES_REPO }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Built on: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts uploaded to release" >> $GITHUB_STEP_SUMMARY
