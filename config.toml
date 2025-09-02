@@ -16,7 +16,7 @@ arch = "arm64-v8a"
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
 build-mode = "both"
 included-patches = "'Theme'"
-patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube"
+patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube"
 
 
 
@@ -24,14 +24,14 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'Gms
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
 build-mode = "both"
 included-patches = "'MaterialYou' 'Theme'"
-patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube"
+patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube"
 
 
 [YouTube-Custom]
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
 build-mode = "both"
 included-patches = "'Theme'"
-patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube -e 'Custom branding icon for YouTube' -OappIcon=revancify_red -OchangeSplashIcon=true"
+patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube -e 'Custom branding icon for YouTube' -OappIcon=revancify_red -OchangeSplashIcon=true"
 
 
 
@@ -39,7 +39,7 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'Gms
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
 build-mode = "both"
 included-patches = "'MaterialYou' 'Theme'"
-patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube -e 'Custom branding icon for YouTube' -OappIcon=revancify_red -OchangeSplashIcon=true"
+patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTube=prathxm.youtube -e 'Custom branding icon for YouTube' -OappIcon=revancify_red -OchangeSplashIcon=true"
 
 
 
@@ -49,14 +49,17 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel=Prathxm Rvx -e 'Gms
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube-music/"
 patches-version = "dev"
 build-mode = "both"
-patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel=Prathxm RVX -e 'GmsCore support' -OpackageNameYouTubeMusic=prathxm.youtube.music"
+patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTubeMusic=prathxm.youtube.music"
 
 
 [Music-Custom]
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube-music/"
 patches-version = "dev"
 build-mode = "both"
-patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel=Prathxm RVX -e 'GmsCore support' -OpackageNameYouTubeMusic=prathxm.youtube.music -e 'Custom branding icon for YouTube Music' -OappIcon=revancify_red -OchangeSplashIcon=true"
+patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel='Prathxm Rvx' -e 'GmsCore support' -OpackageNameYouTubeMusic=prathxm.youtube.music -e 'Custom branding icon for YouTube Music' -OappIcon=revancify_red -OchangeSplashIcon=true"
+
+
+
 
 
 
