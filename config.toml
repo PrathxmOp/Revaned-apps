@@ -9,7 +9,7 @@ cli-version = "latest"
 rv-brand = "Prathxm ReVanced"
 patches-source = "anddea/revanced-patches"
 integrations-source = "anddea/revanced-integrations"
-patches-version = "dev"
+patches-version = "latest"
 
 
 
