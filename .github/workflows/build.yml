@@ -107,6 +107,250 @@ jobs:
           file_pattern: build.md *-update.json
           commit_message: Bump version ${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}
 
+      - name: Post to PocketBase
+        env:
+          POCKETBASE_URL: ${{ secrets.POCKETBASE_URL }}
+          POCKETBASE_EMAIL: ${{ secrets.POCKETBASE_EMAIL }}
+          POCKETBASE_PASSWORD: ${{ secrets.POCKETBASE_PASSWORD }}
+          PATCH_VERSION: ${{ secrets.PATCH_VERSION }}  # e.g., "3.12.0"
+          DEV_NAME: ${{ secrets.DEV_NAME }}  # e.g., "anddea"
+        if: env.POCKETBASE_URL != null
+        run: |
+          cd build || { echo "build folder not found"; exit 1; }
+          
+          # Function to authenticate with PocketBase
+          authenticate_pocketbase() {
+            local auth_response=$(curl -s -X POST "${POCKETBASE_URL}/api/collections/users/auth-with-password" \
+              -H "Content-Type: application/json" \
+              -d "{\"identity\":\"${POCKETBASE_EMAIL}\",\"password\":\"${POCKETBASE_PASSWORD}\"}")
+            
+            echo "$auth_response" | jq -r '.token // empty'
+          }
+          
+          # Get auth token
+          TOKEN=$(authenticate_pocketbase)
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to authenticate with PocketBase"
+            exit 1
+          fi
+          
+          # Function to get apps from PocketBase
+          get_apps() {
+            curl -s -X GET "${POCKETBASE_URL}/api/collections/apps/records" \
+              -H "Authorization: Bearer $TOKEN"
+          }
+          
+          # Function to create version record
+          create_version() {
+            local app_id="$1"
+            local app_name="$2"
+            local version="$3"
+            local download_options="$4"
+            
+            local current_date=$(date +"%Y-%m-%d")
+            local changelog_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}"
+            
+            local version_data=$(cat <<EOF
+          {
+            "app": "${app_id}",
+            "version": "${version}",
+            "patch_version": "${PATCH_VERSION}",
+            "dev_name": "${DEV_NAME}",
+            "release_date": "${current_date}",
+            "changelog_url": "${changelog_url}",
+            "download_options": ${download_options}
+          }
+          EOF
+            )
+            
+            curl -s -X POST "${POCKETBASE_URL}/api/collections/versions/records" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $TOKEN" \
+              -d "$version_data"
+          }
+          
+          # Function to extract version from filename
+          extract_version() {
+            local filename="$1"
+            # Extract version pattern like v19.47.53 or 19.47.53
+            echo "$filename" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | head -1
+          }
+          
+          # Function to determine if file is root version
+          is_root_version() {
+            local filename="$1"
+            if [[ $filename == *root* ]] || [[ $filename == *magisk* ]] || [[ $filename == *.zip ]]; then
+              return 0  # true
+            else
+              return 1  # false
+            fi
+          }
+          
+          # Function to determine app name based on filename and root status
+          get_app_name() {
+            local filename="$1"
+            local is_root="$2"
+            
+            if [[ $filename == *youtube* ]] && [[ $filename != *music* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "YouTube Root"
+              else
+                echo "YouTube"
+              fi
+            elif [[ $filename == *music* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "YouTube Music Root"
+              else
+                echo "YouTube Music"
+              fi
+            elif [[ $filename == *tiktok* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "TikTok Root"
+              else
+                echo "TikTok"
+              fi
+            elif [[ $filename == *instagram* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "Instagram Root"
+              else
+                echo "Instagram"
+              fi
+            # Add more app patterns as needed
+            else
+              echo "Unknown"
+            fi
+          }
+          
+          # Function to create appropriate tags based on filename
+          create_tags() {
+            local filename="$1"
+            local is_root="$2"
+            local tags=""
+            
+            if [ "$is_root" = "true" ]; then
+              tags='["Root"'
+            else
+              tags='["Non-Root"'
+            fi
+            
+            # Add icon type tags
+            if [[ $filename == *custom* ]]; then
+              tags="${tags}, \"Custom Icon\""
+            elif [[ $filename == *og* ]] || [[ $filename == *original* ]]; then
+              tags="${tags}, \"OG Icon\""
+            fi
+            
+            # Add MaterialYou tag
+            if [[ $filename == *materialyou* ]]; then
+              tags="${tags}, \"MaterialYou\""
+            fi
+            
+            # Add architecture tags if present
+            if [[ $filename == *arm64* ]]; then
+              tags="${tags}, \"ARM64\""
+            elif [[ $filename == *arm* ]]; then
+              tags="${tags}, \"ARM\""
+            fi
+            
+            tags="${tags}]"
+            echo "$tags"
+          }
+          
+          # Get all apps from PocketBase
+          APPS_RESPONSE=$(get_apps)
+          if [ $? -ne 0 ]; then
+            echo "Failed to fetch apps from PocketBase"
+            exit 1
+          fi
+          
+          # Group files by app and version
+          declare -A app_versions
+          declare -A app_downloads
+          
+          for OUTPUT in *; do
+            [[ -f "$OUTPUT" ]] || continue
+            
+            VERSION=$(extract_version "$OUTPUT")
+            [ -z "$VERSION" ] && continue
+            
+            BASE_APP_NAME=$(get_app_name "$OUTPUT" "$IS_ROOT")
+            [ "$BASE_APP_NAME" = "Unknown" ] && continue
+            
+            # Find matching app in PocketBase
+            APP_ID=$(echo "$APPS_RESPONSE" | jq -r --arg name "$BASE_APP_NAME" '.items[] | select(.name == $name) | .id')
+            
+            if [ -z "$APP_ID" ] || [ "$APP_ID" = "null" ]; then
+              echo "App '$BASE_APP_NAME' not found in apps collection, skipping $OUTPUT"
+              continue
+            fi
+            
+            # Create download URL
+            DL_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}/${OUTPUT}"
+            
+            # Determine download option name
+            OPTION_NAME="Default"
+            if [[ $OUTPUT == *custom* ]] && [[ $OUTPUT == *materialyou* ]]; then
+              OPTION_NAME="Custom Icon + MaterialYou"
+            elif [[ $OUTPUT == *og* ]] && [[ $OUTPUT == *materialyou* ]]; then
+              OPTION_NAME="OG + MaterialYou"
+            elif [[ $OUTPUT == *custom* ]]; then
+              OPTION_NAME="Custom Icon"
+            elif [[ $OUTPUT == *og* ]] || [[ $OUTPUT == *original* ]]; then
+              OPTION_NAME="OG Icon"
+            elif [[ $OUTPUT == *root* ]]; then
+              OPTION_NAME="Root Version"
+            elif [[ $OUTPUT == *magisk* ]]; then
+              OPTION_NAME="Magisk Module"
+            fi
+            
+            # Create tags
+            TAGS=$(create_tags "$OUTPUT" "$IS_ROOT")
+            
+            # Create download option object
+            DOWNLOAD_OPTION=$(cat <<EOF
+          {
+            "name": "${OPTION_NAME}",
+            "url": "${DL_URL}",
+            "tags": ${TAGS}
+          }
+          EOF
+            )
+            
+            # Group by app_id and version (keeping root and regular separate)
+            KEY="${APP_ID}_${VERSION}_${IS_ROOT}"
+            if [ -z "${app_versions[$KEY]}" ]; then
+              app_versions[$KEY]="$APP_ID|$BASE_APP_NAME|$VERSION|$IS_ROOT"
+              app_downloads[$KEY]="[$DOWNLOAD_OPTION"
+            else
+              app_downloads[$KEY]="${app_downloads[$KEY]}, $DOWNLOAD_OPTION"
+            fi
+          done
+          
+          # Create version records for each app-version combination
+          for key in "${!app_versions[@]}"; do
+            IFS='|' read -r app_id app_name version is_root <<< "${app_versions[$key]}"
+            download_options="${app_downloads[$key]}]"
+            
+            if [ "$is_root" = "true" ]; then
+              echo "Creating root version record for $app_name v$version..."
+            else
+              echo "Creating regular version record for $app_name v$version..."
+            fi
+            
+            RESULT=$(create_version "$app_id" "$app_name" "$version" "$download_options")
+            
+            if echo "$RESULT" | jq -e '.id' > /dev/null 2>&1; then
+              if [ "$is_root" = "true" ]; then
+                echo "Successfully created root version record for $app_name v$version"
+              else
+                echo "Successfully created regular version record for $app_name v$version"
+              fi
+            else
+              echo "Failed to create version record for $app_name v$version"
+              echo "Response: $RESULT"
+            fi
+          done
+
       - name: Report to Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
