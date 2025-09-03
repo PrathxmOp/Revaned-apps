@@ -83,6 +83,16 @@ patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel='Prathxm Rvx'
 
 
 
+[GooglePhotos]
+apkmirror-dlurl = "https://www.apkmirror.com/apk/google-inc/photos/"
+uptodown-dlurl = "https://google-photos.en.uptodown.com/android"
+build-mode = "both"
+arch = "arm64-v8a"
+version = "auto"
+
+
+
+
 
 
 
