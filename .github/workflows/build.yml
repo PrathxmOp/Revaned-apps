@@ -11,11 +11,7 @@ on:
 
 jobs:
   run:
-    permissions:
-      contents: write
-      actions: read
-      packages: read
-    timeout-minutes: 60
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-java@v4
@@ -28,16 +24,6 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
-
-      - name: Cache dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
 
       - name: Update config
         if: ${{ inputs.from_ci }}
@@ -119,12 +105,7 @@ jobs:
           echo "PATCHES_REPO=$PATCHES_REPO" >> $GITHUB_OUTPUT
 
       - name: Build modules/APKs
-        run: |
-          if [ -f "config.json" ]; then
-            ./build.sh config.json || exit 1
-          else
-            ./build.sh config.toml || exit 1
-          fi
+        run: if [ -f "config.json" ]; then ./build.sh config.json; else ./build.sh config.toml; fi
         env:
           GITHUB_TOKEN: ${{ secrets.PITHUB_TOKEN }}
           GITHUB_REPOSITORY: $GITHUB_REPOSITORY
@@ -525,14 +506,7 @@ jobs:
           MODULES=${MODULES#"$NL"}
           APKS=${APKS#"$NL"}
 
-          BODY=$(awk '
-            /^\* \*\*/ {sub(/^\* \*\*/, "↪ *"); print; next}
-            /^\* `/ {sub(/^\* `/, "↪ *"); gsub(/`/, "*"); print; next}
-            /^\* / {sub(/^\* /, "↪ "); print; next}
-            /^==/ {next}
-            {print}
-          ' ../build.md)
-          
+          BODY="$(sed 's/^\* \*\*/↪ \*\*/g; s/^\* `/↪ \*\*/g; s/`/\*/g; s/^\* /\↪/g; s/\*\*/\*/g; s/###//g; s/^- /↪ /g; /^==/d;' ../build.md)"
           MSG="*New build!*
 
           ${BODY}
@@ -548,13 +522,3 @@ jobs:
           MSG=${MSG:0:9450}
           POST="https://api.telegram.org/bot${TG_TOKEN}/sendMessage"
           curl -X POST --data-urlencode "parse_mode=Markdown" --data-urlencode "disable_web_page_preview=true" --data-urlencode "text=${MSG}" --data-urlencode "chat_id=${TG_CHAT}" "$POST"
-
-      - name: Build Summary
-        if: always()
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Version Code: ${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Patch Version: ${{ steps.patches_info.outputs.PATCH_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Patches Repository: ${{ steps.patches_info.outputs.PATCHES_REPO }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Built on: $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts uploaded to release" >> $GITHUB_STEP_SUMMARY
