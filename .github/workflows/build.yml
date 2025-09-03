@@ -44,6 +44,66 @@ jobs:
           if [ -z "$TAG" ]; then TAG=0; fi
           echo "NEXT_VER_CODE=$((TAG + 1))" >> $GITHUB_OUTPUT
 
+      - name: Get patches repository info
+        id: patches_info
+        env:
+          GH_TOKEN: ${{ secrets.PITHUB_TOKEN }}
+        run: |
+          # Function to extract repo info with fallbacks
+          get_patches_repo() {
+            local repo=""
+            
+            # Try config.toml first
+            if [ -f "config.toml" ]; then
+              repo=$(grep -E '^patches\s*=' config.toml | head -1 | awk -F'"' '{print $2}')
+            fi
+            
+            # Try config.json if not found
+            if [ -z "$repo" ] && [ -f "config.json" ]; then
+              repo=$(jq -r '.patches // empty' config.json 2>/dev/null || echo "")
+            fi
+            
+            # Default fallback
+            if [ -z "$repo" ]; then
+              repo="anddea/revanced-patches"
+            fi
+            
+            echo "$repo"
+          }
+          
+          # Function to get patch version with multiple fallbacks
+          get_patch_version() {
+            local repo="$1"
+            local version=""
+            
+            # Try latest release
+            version=$(gh api "repos/$repo/releases/latest" --jq '.tag_name // .name' 2>/dev/null || echo "")
+            
+            # Try latest tag if no release
+            if [ -z "$version" ]; then
+              version=$(gh api "repos/$repo/tags" --jq '.[0].name' 2>/dev/null || echo "")
+            fi
+            
+            # Use commit SHA as final fallback
+            if [ -z "$version" ]; then
+              DEFAULT_BRANCH=$(gh api "repos/$repo" --jq '.default_branch' 2>/dev/null || echo "main")
+              version=$(gh api "repos/$repo/branches/$DEFAULT_BRANCH" --jq '.commit.sha' 2>/dev/null | cut -c1-7 || echo "unknown")
+            fi
+            
+            echo "$version"
+          }
+          
+          PATCHES_REPO=$(get_patches_repo)
+          REPO_OWNER=$(echo "$PATCHES_REPO" | cut -d'/' -f1)
+          REPO_NAME=$(echo "$PATCHES_REPO" | cut -d'/' -f2)
+          PATCH_VERSION=$(get_patch_version "$PATCHES_REPO")
+          
+          echo "REPO_OWNER=$REPO_OWNER" >> $GITHUB_OUTPUT
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "PATCH_VERSION=$PATCH_VERSION" >> $GITHUB_OUTPUT
+          echo "DEV_NAME=$REPO_OWNER" >> $GITHUB_OUTPUT
+          echo "PATCHES_REPO=$PATCHES_REPO" >> $GITHUB_OUTPUT
+
       - name: Build modules/APKs
         run: if [ -f "config.json" ]; then ./build.sh config.json; else ./build.sh config.toml; fi
         env:
@@ -107,12 +167,348 @@ jobs:
           file_pattern: build.md *-update.json
           commit_message: Bump version ${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}
 
+      - name: Post to PocketBase
+        env:
+          POCKETBASE_URL: ${{ secrets.POCKETBASE_URL }}
+          POCKETBASE_EMAIL: ${{ secrets.POCKETBASE_EMAIL }}
+          POCKETBASE_PASSWORD: ${{ secrets.POCKETBASE_PASSWORD }}
+          DEV_NAME: ${{ steps.patches_info.outputs.DEV_NAME }}
+          PATCH_VERSION: ${{ steps.patches_info.outputs.PATCH_VERSION }}
+          PATCHES_REPO: ${{ steps.patches_info.outputs.PATCHES_REPO }}
+        if: env.POCKETBASE_URL != null
+        run: |
+          cd build || { echo "build folder not found" >&2; exit 1; }
+          
+          echo "Using dev: $DEV_NAME" >&2
+          echo "Using patch version: $PATCH_VERSION" >&2
+          echo "Using patches repo: $PATCHES_REPO" >&2
+          
+          # Function to authenticate with PocketBase
+          authenticate_pocketbase() {
+            local max_retries=3
+            local retry_count=0
+            
+            while [ $retry_count -lt $max_retries ]; do
+              local auth_response=$(curl -s -f -X POST "${POCKETBASE_URL}/api/collections/users/auth-with-password" \
+                -H "Content-Type: application/json" \
+                -d "{\"identity\":\"${POCKETBASE_EMAIL}\",\"password\":\"${POCKETBASE_PASSWORD}\"}")
+              
+              if [ $? -eq 0 ] && [ -n "$(echo "$auth_response" | jq -r '.token // empty')" ]; then
+                echo "$auth_response" | jq -r '.token'
+                return 0
+              fi
+              
+              retry_count=$((retry_count + 1))
+              sleep 2
+            done
+            
+            echo "Failed to authenticate after $max_retries attempts" >&2
+            return 1
+          }
+          
+          # Function to get patches changelog URL
+          get_patches_changelog_url() {
+            local patches_repo="$1"
+            local patch_version="$2"
+            local changelog_url=""
+            
+            echo "Getting changelog URL for $patches_repo version $patch_version" >&2
+            
+            # Try to get release URL for the specific version
+            if [ "$patch_version" != "unknown" ] && [ -n "$patch_version" ]; then
+              local release_info=$(gh api "repos/$patches_repo/releases/tags/$patch_version" 2>/dev/null || echo "")
+              if [ -n "$release_info" ] && [ "$release_info" != "null" ]; then
+                changelog_url=$(echo "$release_info" | jq -r '.html_url // empty')
+                echo "Found specific release URL: $changelog_url" >&2
+              fi
+            fi
+            
+            # Fallback to the tag URL if no release URL was found for the version
+            if [ -z "$changelog_url" ] && [ "$patch_version" != "unknown" ]; then
+                local tag_info=$(gh api "repos/$patches_repo/git/ref/tags/$patch_version" 2>/dev/null || echo "")
+                if [ -n "$tag_info" ] && [ "$tag_info" != "null" ]; then
+                    changelog_url="https://github.com/$patches_repo/releases/tag/$patch_version"
+                    echo "Found specific tag URL: $changelog_url" >&2
+                fi
+            fi
+            
+            # Fallback to latest release if specific version not found
+            if [ -z "$changelog_url" ]; then
+              local latest_release=$(gh api "repos/$patches_repo/releases/latest" 2>/dev/null || echo "")
+              if [ -n "$latest_release" ] && [ "$latest_release" != "null" ]; then
+                changelog_url=$(echo "$latest_release" | jq -r '.html_url // empty')
+                echo "Using latest release URL: $changelog_url" >&2
+              fi
+            fi
+            
+            # Final fallback to releases page
+            if [ -z "$changelog_url" ]; then
+              changelog_url="https://github.com/$patches_repo/releases"
+              echo "Using fallback releases page: $changelog_url" >&2
+            fi
+            
+            echo "$changelog_url"
+          }
+          
+          # Get auth token
+          TOKEN=$(authenticate_pocketbase)
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to authenticate with PocketBase" >&2
+            exit 1
+          fi
+          
+          # Get patches changelog URL
+          PATCHES_CHANGELOG_URL=$(get_patches_changelog_url "$PATCHES_REPO" "$PATCH_VERSION")
+          echo "Patches changelog URL: $PATCHES_CHANGELOG_URL" >&2
+          
+          # Function to get apps from PocketBase
+          get_apps() {
+            curl -s -f -X GET "${POCKETBASE_URL}/api/collections/apps/records" \
+              -H "Authorization: Bearer $TOKEN"
+          }
+          
+          # Function to create version record
+          create_version() {
+            local app_id="$1"
+            local app_name="$2"
+            local version="$3"
+            local download_options="$4"
+
+            if [ -z "$app_id" ] || [ "$app_id" = "null" ]; then
+              echo "Error: Missing or invalid app ID for '$app_name'. Skipping record creation." >&2
+              return 1
+            fi
+            
+            local current_date=$(date +"%Y-%m-%d")
+            local release_changelog_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}"
+            
+            local version_data=$(cat <<EOF
+          {
+            "app": "${app_id}",
+            "version": "${version}",
+            "patch_version": "${PATCH_VERSION}",
+            "dev_name": "${DEV_NAME}",
+            "release_date": "${current_date}",
+            "changelog_url": "${PATCHES_CHANGELOG_URL}",
+            "release_url": "${release_changelog_url}",
+            "download_options": ${download_options}
+          }
+          EOF
+            )
+            
+            echo "JSON Payload being sent:" >&2
+            echo "$version_data" >&2
+            
+            curl -s -f -X POST "${POCKETBASE_URL}/api/collections/versions/records" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $TOKEN" \
+              -d "$version_data"
+          }
+          
+          # Function to extract version from filename
+          extract_version() {
+            local filename="$1"
+            # Try multiple patterns for version extraction
+            local version=$(echo "$filename" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^v//')
+            
+            # If no version found, try other patterns
+            if [ -z "$version" ]; then
+              version=$(echo "$filename" | grep -oE '[0-9]+_[0-9]+_[0-9]+' | head -1 | tr '_' '.')
+            fi
+            
+            echo "$version"
+          }
+          
+          # Function to determine if file is root version
+          is_root_version() {
+            local filename="$1"
+            if [[ $filename == *root* ]] || [[ $filename == *magisk* ]] || [[ $filename == *.zip ]]; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+          
+          # Function to determine app name based on filename and root status
+          get_app_name() {
+            local filename="$1"
+            local is_root="$2"
+            
+            if [[ $filename == *youtube* ]] && [[ $filename != *music* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "YouTube Root"
+              else
+                echo "YouTube"
+              fi
+            elif [[ $filename == *music* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "YouTube Music Root"
+              else
+                echo "YouTube Music"
+              fi
+            elif [[ $filename == *tiktok* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "TikTok Root"
+              else
+                echo "TikTok"
+              fi
+            elif [[ $filename == *instagram* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "Instagram Root"
+              else
+                echo "Instagram"
+              fi
+            elif [[ $filename == *photos* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "Google Photos Root"
+              else
+                echo "Google Photos"
+              fi
+            # Add more app patterns as needed
+            else
+              echo "Unknown"
+            fi
+          }
+          
+          # Function to create appropriate tags based on filename
+          create_tags() {
+            local filename="$1"
+            local is_root="$2"
+            local tags=""
+            
+            if [ "$is_root" = "true" ]; then
+              tags='["Root"'
+            else
+              tags='["Non-Root"'
+            fi
+            
+            # Add icon type tags
+            if [[ $filename == *custom* ]]; then
+              tags="${tags}, \"Custom Icon\""
+            elif [[ $filename == *og* ]] || [[ $filename == *original* ]]; then
+              tags="${tags}, \"OG Icon\""
+            fi
+            
+            # Add MaterialYou tag
+            if [[ $filename == *materialyou* ]]; then
+              tags="${tags}, \"MaterialYou\""
+            fi
+            
+            # Add architecture tags if present
+            if [[ $filename == *arm64* ]]; then
+              tags="${tags}, \"ARM64\""
+            elif [[ $filename == *arm* ]]; then
+              tags="${tags}, \"ARM\""
+            fi
+            
+            tags="${tags}]"
+            echo "$tags"
+          }
+          
+          # Get all apps from PocketBase
+          APPS_RESPONSE=$(get_apps)
+          if [ $? -ne 0 ]; then
+            echo "Failed to fetch apps from PocketBase" >&2
+            exit 1
+          fi
+          
+          # Group files by app and version
+          declare -A app_versions
+          declare -A app_downloads
+          
+          for OUTPUT in *; do
+            [[ -f "$OUTPUT" ]] || continue
+            
+            VERSION=$(extract_version "$OUTPUT")
+            [ -z "$VERSION" ] && continue
+            
+            IS_ROOT=$(is_root_version "$OUTPUT")
+            BASE_APP_NAME=$(get_app_name "$OUTPUT" "$IS_ROOT")
+            [ "$BASE_APP_NAME" = "Unknown" ] && continue
+            
+            # Find matching app in PocketBase
+            APP_ID=$(echo "$APPS_RESPONSE" | jq -r --arg name "$BASE_APP_NAME" '.items[] | select(.name == $name) | .id')
+            
+            if [ -z "$APP_ID" ] || [ "$APP_ID" = "null" ]; then
+              echo "App '$BASE_APP_NAME' not found in apps collection, skipping $OUTPUT" >&2
+              continue
+            fi
+            
+            # Create download URL
+            DL_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}/${OUTPUT}"
+            
+            # Determine download option name
+            OPTION_NAME="Default"
+            if [[ $OUTPUT == *custom* ]] && [[ $OUTPUT == *materialyou* ]]; then
+              OPTION_NAME="Custom Icon + MaterialYou"
+            elif [[ $OUTPUT == *og* ]] && [[ $OUTPUT == *materialyou* ]]; then
+              OPTION_NAME="OG + MaterialYou"
+            elif [[ $OUTPUT == *custom* ]]; then
+              OPTION_NAME="Custom Icon"
+            elif [[ $OUTPUT == *og* ]] || [[ $OUTPUT == *original* ]]; then
+              OPTION_NAME="OG Icon"
+            elif [[ $OUTPUT == *root* ]]; then
+              OPTION_NAME="Root Version"
+            elif [[ $OUTPUT == *magisk* ]]; then
+              OPTION_NAME="Magisk Module"
+            fi
+            
+            # Create tags
+            TAGS=$(create_tags "$OUTPUT" "$IS_ROOT")
+            
+            # Create download option object and remove newlines
+            DOWNLOAD_OPTION=$(cat <<EOF
+          {
+            "name": "${OPTION_NAME}",
+            "url": "${DL_URL}",
+            "tags": ${TAGS}
+          }
+          EOF
+            )
+            
+            DOWNLOAD_OPTION=$(echo "$DOWNLOAD_OPTION" | tr -d '\n')
+            
+            # Group by app_id and version (keeping root and regular separate)
+            KEY="${APP_ID}_${VERSION}_${IS_ROOT}"
+            if [ -z "${app_versions[$KEY]}" ]; then
+              app_versions[$KEY]="$APP_ID|$BASE_APP_NAME|$VERSION|$IS_ROOT"
+              app_downloads[$KEY]="[$DOWNLOAD_OPTION"
+            else
+              app_downloads[$KEY]="${app_downloads[$KEY]}, $DOWNLOAD_OPTION"
+            fi
+          done
+          
+          # Create version records for each app-version combination
+          for key in "${!app_versions[@]}"; do
+            IFS='|' read -r app_id app_name version is_root <<< "${app_versions[$key]}"
+            download_options="${app_downloads[$key]}]"
+            
+            if [ "$is_root" = "true" ]; then
+              echo "Creating root version record for $app_name v$version..." >&2
+            else
+              echo "Creating regular version record for $app_name v$version..." >&2
+            fi
+            
+            RESULT=$(create_version "$app_id" "$app_name" "$version" "$download_options")
+            
+            if echo "$RESULT" | jq -e '.id' > /dev/null 2>&1; then
+              if [ "$is_root" = "true" ]; then
+                echo "Successfully created root version record for $app_name v$version" >&2
+              else
+                echo "Successfully created regular version record for $app_name v$version" >&2
+              fi
+            else
+              echo "Failed to create version record for $app_name v$version" >&2
+              echo "Response: $RESULT" >&2
+            fi
+          done
+
       - name: Report to Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-        if: env.TG_TOKEN != null
+        if: env.TG_TOKEN != ''
         run: |
-          cd build || { echo "build folder not found"; exit 1; }
+          cd build || { echo "build folder not found" >&2; exit 1; }
 
           TG_CHAT="-1002713902083"
           NL=$'\n'
