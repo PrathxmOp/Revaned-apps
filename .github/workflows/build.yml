@@ -193,12 +193,14 @@ jobs:
           POCKETBASE_PASSWORD: ${{ secrets.POCKETBASE_PASSWORD }}
           DEV_NAME: ${{ steps.patches_info.outputs.DEV_NAME }}
           PATCH_VERSION: ${{ steps.patches_info.outputs.PATCH_VERSION }}
+          PATCHES_REPO: ${{ steps.patches_info.outputs.PATCHES_REPO }}
         if: env.POCKETBASE_URL != null
         run: |
           cd build || { echo "build folder not found"; exit 1; }
           
           echo "Using dev: $DEV_NAME"
           echo "Using patch version: $PATCH_VERSION"
+          echo "Using patches repo: $PATCHES_REPO"
           
           # Function to authenticate with PocketBase
           authenticate_pocketbase() {
@@ -223,12 +225,51 @@ jobs:
             return 1
           }
           
+          # Function to get patches changelog URL
+          get_patches_changelog_url() {
+            local patches_repo="$1"
+            local patch_version="$2"
+            local changelog_url=""
+            
+            echo "Getting changelog URL for $patches_repo version $patch_version"
+            
+            # Try to get release URL first
+            if [ "$patch_version" != "unknown" ] && [ -n "$patch_version" ]; then
+              local release_info=$(gh api "repos/$patches_repo/releases/tags/$patch_version" 2>/dev/null || echo "")
+              if [ -n "$release_info" ] && [ "$release_info" != "null" ]; then
+                changelog_url=$(echo "$release_info" | jq -r '.html_url // empty')
+                echo "Found specific release URL: $changelog_url"
+              fi
+            fi
+            
+            # Fallback to latest release if specific version not found
+            if [ -z "$changelog_url" ]; then
+              local latest_release=$(gh api "repos/$patches_repo/releases/latest" 2>/dev/null || echo "")
+              if [ -n "$latest_release" ] && [ "$latest_release" != "null" ]; then
+                changelog_url=$(echo "$latest_release" | jq -r '.html_url // empty')
+                echo "Using latest release URL: $changelog_url"
+              fi
+            fi
+            
+            # Final fallback to releases page
+            if [ -z "$changelog_url" ]; then
+              changelog_url="https://github.com/$patches_repo/releases"
+              echo "Using fallback releases page: $changelog_url"
+            fi
+            
+            echo "$changelog_url"
+          }
+          
           # Get auth token
           TOKEN=$(authenticate_pocketbase)
           if [ -z "$TOKEN" ]; then
             echo "Failed to authenticate with PocketBase"
             exit 1
           fi
+          
+          # Get patches changelog URL
+          PATCHES_CHANGELOG_URL=$(get_patches_changelog_url "$PATCHES_REPO" "$PATCH_VERSION")
+          echo "Patches changelog URL: $PATCHES_CHANGELOG_URL"
           
           # Function to get apps from PocketBase
           get_apps() {
@@ -244,7 +285,7 @@ jobs:
             local download_options="$4"
             
             local current_date=$(date +"%Y-%m-%d")
-            local changelog_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}"
+            local release_changelog_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}"
             
             local version_data=$(cat <<EOF
           {
@@ -253,7 +294,8 @@ jobs:
             "patch_version": "${PATCH_VERSION}",
             "dev_name": "${DEV_NAME}",
             "release_date": "${current_date}",
-            "changelog_url": "${changelog_url}",
+            "changelog_url": "${PATCHES_CHANGELOG_URL}",
+            "release_url": "${release_changelog_url}",
             "download_options": ${download_options}
           }
           EOF
@@ -317,6 +359,12 @@ jobs:
                 echo "Instagram Root"
               else
                 echo "Instagram"
+              fi
+            elif [[ $filename == *photos* ]]; then
+              if [ "$is_root" = "true" ]; then
+                echo "Google Photos Root"
+              else
+                echo "Google Photos"
               fi
             # Add more app patterns as needed
             else
