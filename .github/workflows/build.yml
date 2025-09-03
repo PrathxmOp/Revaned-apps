@@ -177,11 +177,11 @@ jobs:
           PATCHES_REPO: ${{ steps.patches_info.outputs.PATCHES_REPO }}
         if: env.POCKETBASE_URL != null
         run: |
-          cd build || { echo "build folder not found"; exit 1; }
+          cd build || { echo "build folder not found" >&2; exit 1; }
           
-          echo "Using dev: $DEV_NAME"
-          echo "Using patch version: $PATCH_VERSION"
-          echo "Using patches repo: $PATCHES_REPO"
+          echo "Using dev: $DEV_NAME" >&2
+          echo "Using patch version: $PATCH_VERSION" >&2
+          echo "Using patches repo: $PATCHES_REPO" >&2
           
           # Function to authenticate with PocketBase
           authenticate_pocketbase() {
@@ -212,23 +212,23 @@ jobs:
             local patch_version="$2"
             local changelog_url=""
             
-            echo "Getting changelog URL for $patches_repo version $patch_version"
+            echo "Getting changelog URL for $patches_repo version $patch_version" >&2
             
             # Try to get release URL for the specific version
             if [ "$patch_version" != "unknown" ] && [ -n "$patch_version" ]; then
               local release_info=$(gh api "repos/$patches_repo/releases/tags/$patch_version" 2>/dev/null || echo "")
               if [ -n "$release_info" ] && [ "$release_info" != "null" ]; then
                 changelog_url=$(echo "$release_info" | jq -r '.html_url // empty')
-                echo "Found specific release URL: $changelog_url"
+                echo "Found specific release URL: $changelog_url" >&2
               fi
             fi
-
+            
             # Fallback to the tag URL if no release URL was found for the version
             if [ -z "$changelog_url" ] && [ "$patch_version" != "unknown" ]; then
                 local tag_info=$(gh api "repos/$patches_repo/git/ref/tags/$patch_version" 2>/dev/null || echo "")
                 if [ -n "$tag_info" ] && [ "$tag_info" != "null" ]; then
                     changelog_url="https://github.com/$patches_repo/releases/tag/$patch_version"
-                    echo "Found specific tag URL: $changelog_url"
+                    echo "Found specific tag URL: $changelog_url" >&2
                 fi
             fi
             
@@ -237,14 +237,14 @@ jobs:
               local latest_release=$(gh api "repos/$patches_repo/releases/latest" 2>/dev/null || echo "")
               if [ -n "$latest_release" ] && [ "$latest_release" != "null" ]; then
                 changelog_url=$(echo "$latest_release" | jq -r '.html_url // empty')
-                echo "Using latest release URL: $changelog_url"
+                echo "Using latest release URL: $changelog_url" >&2
               fi
             fi
             
             # Final fallback to releases page
             if [ -z "$changelog_url" ]; then
               changelog_url="https://github.com/$patches_repo/releases"
-              echo "Using fallback releases page: $changelog_url"
+              echo "Using fallback releases page: $changelog_url" >&2
             fi
             
             echo "$changelog_url"
@@ -253,13 +253,13 @@ jobs:
           # Get auth token
           TOKEN=$(authenticate_pocketbase)
           if [ -z "$TOKEN" ]; then
-            echo "Failed to authenticate with PocketBase"
+            echo "Failed to authenticate with PocketBase" >&2
             exit 1
           fi
           
           # Get patches changelog URL
           PATCHES_CHANGELOG_URL=$(get_patches_changelog_url "$PATCHES_REPO" "$PATCH_VERSION")
-          echo "Patches changelog URL: $PATCHES_CHANGELOG_URL"
+          echo "Patches changelog URL: $PATCHES_CHANGELOG_URL" >&2
           
           # Function to get apps from PocketBase
           get_apps() {
@@ -273,6 +273,11 @@ jobs:
             local app_name="$2"
             local version="$3"
             local download_options="$4"
+
+            if [ -z "$app_id" ] || [ "$app_id" = "null" ]; then
+              echo "Error: Missing or invalid app ID for '$app_name'. Skipping record creation." >&2
+              return 1
+            fi
             
             local current_date=$(date +"%Y-%m-%d")
             local release_changelog_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/${{ steps.next_ver_code.outputs.NEXT_VER_CODE }}"
@@ -291,8 +296,7 @@ jobs:
           EOF
             )
             
-            # Add this line to see the payload!
-            echo "JSON Payload:" >&2
+            echo "JSON Payload being sent:" >&2
             echo "$version_data" >&2
             
             curl -s -f -X POST "${POCKETBASE_URL}/api/collections/versions/records" \
@@ -404,7 +408,7 @@ jobs:
           # Get all apps from PocketBase
           APPS_RESPONSE=$(get_apps)
           if [ $? -ne 0 ]; then
-            echo "Failed to fetch apps from PocketBase"
+            echo "Failed to fetch apps from PocketBase" >&2
             exit 1
           fi
           
@@ -426,7 +430,7 @@ jobs:
             APP_ID=$(echo "$APPS_RESPONSE" | jq -r --arg name "$BASE_APP_NAME" '.items[] | select(.name == $name) | .id')
             
             if [ -z "$APP_ID" ] || [ "$APP_ID" = "null" ]; then
-              echo "App '$BASE_APP_NAME' not found in apps collection, skipping $OUTPUT"
+              echo "App '$BASE_APP_NAME' not found in apps collection, skipping $OUTPUT" >&2
               continue
             fi
             
@@ -452,7 +456,7 @@ jobs:
             # Create tags
             TAGS=$(create_tags "$OUTPUT" "$IS_ROOT")
             
-            # Create download option object
+            # Create download option object and remove newlines
             DOWNLOAD_OPTION=$(cat <<EOF
           {
             "name": "${OPTION_NAME}",
@@ -461,6 +465,8 @@ jobs:
           }
           EOF
             )
+            
+            DOWNLOAD_OPTION=$(echo "$DOWNLOAD_OPTION" | tr -d '\n')
             
             # Group by app_id and version (keeping root and regular separate)
             KEY="${APP_ID}_${VERSION}_${IS_ROOT}"
@@ -478,31 +484,31 @@ jobs:
             download_options="${app_downloads[$key]}]"
             
             if [ "$is_root" = "true" ]; then
-              echo "Creating root version record for $app_name v$version..."
+              echo "Creating root version record for $app_name v$version..." >&2
             else
-              echo "Creating regular version record for $app_name v$version..."
+              echo "Creating regular version record for $app_name v$version..." >&2
             fi
             
             RESULT=$(create_version "$app_id" "$app_name" "$version" "$download_options")
             
             if echo "$RESULT" | jq -e '.id' > /dev/null 2>&1; then
               if [ "$is_root" = "true" ]; then
-                echo "Successfully created root version record for $app_name v$version"
+                echo "Successfully created root version record for $app_name v$version" >&2
               else
-                echo "Successfully created regular version record for $app_name v$version"
+                echo "Successfully created regular version record for $app_name v$version" >&2
               fi
             else
-              echo "Failed to create version record for $app_name v$version"
-              echo "Response: $RESULT"
+              echo "Failed to create version record for $app_name v$version" >&2
+              echo "Response: $RESULT" >&2
             fi
           done
 
       - name: Report to Telegram
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
-        if: env.TG_TOKEN != null
+        if: env.TG_TOKEN != ''
         run: |
-          cd build || { echo "build folder not found"; exit 1; }
+          cd build || { echo "build folder not found" >&2; exit 1; }
 
           TG_CHAT="-1002713902083"
           NL=$'\n'
