@@ -214,13 +214,22 @@ jobs:
             
             echo "Getting changelog URL for $patches_repo version $patch_version"
             
-            # Try to get release URL first
+            # Try to get release URL for the specific version
             if [ "$patch_version" != "unknown" ] && [ -n "$patch_version" ]; then
               local release_info=$(gh api "repos/$patches_repo/releases/tags/$patch_version" 2>/dev/null || echo "")
               if [ -n "$release_info" ] && [ "$release_info" != "null" ]; then
                 changelog_url=$(echo "$release_info" | jq -r '.html_url // empty')
                 echo "Found specific release URL: $changelog_url"
               fi
+            fi
+
+            # Fallback to the tag URL if no release URL was found for the version
+            if [ -z "$changelog_url" ] && [ "$patch_version" != "unknown" ]; then
+                local tag_info=$(gh api "repos/$patches_repo/git/ref/tags/$patch_version" 2>/dev/null || echo "")
+                if [ -n "$tag_info" ] && [ "$tag_info" != "null" ]; then
+                    changelog_url="https://github.com/$patches_repo/releases/tag/$patch_version"
+                    echo "Found specific tag URL: $changelog_url"
+                fi
             fi
             
             # Fallback to latest release if specific version not found
