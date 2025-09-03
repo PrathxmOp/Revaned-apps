@@ -16,7 +16,7 @@ patches-version = "latest"
 [YouTube-OG]
 uptodown-dlurl = "https://youtube.en.uptodown.com/android"
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
 build-mode = "both"
 arch = "arm64-v8a"
 app-name = "YouTube-OG"
@@ -28,7 +28,7 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'G
 [YouTube-OG-MaterialYou]
 uptodown-dlurl = "https://youtube.en.uptodown.com/android"
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
 build-mode = "both"
 arch = "arm64-v8a"
 app-name = "YouTube-OG-MaterialYou"
@@ -39,7 +39,7 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'G
 [YouTube-Custom]
 uptodown-dlurl = "https://youtube.en.uptodown.com/android"
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
 build-mode = "both"
 arch = "arm64-v8a"
 app-name = "YouTube-Custom"
@@ -51,7 +51,7 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'G
 [YouTube-Custom-MaterialYou]
 uptodown-dlurl = "https://youtube.en.uptodown.com/android"
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube/"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"
 build-mode = "both"
 arch = "arm64-v8a"
 app-name = "YouTube-Custom-MaterialYou"
@@ -65,7 +65,7 @@ patcher-args = "-e 'Settings for YouTube' -OrvxSettingsLabel='Prathxm Rvx' -e 'G
 [Music-OG]
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube-music/"
 uptodown-dlurl = "https://youtube-music.en.uptodown.com/android"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.apps.youtube.music"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.apps.youtube.music"
 app-name = "Music-OG"
 arch = "arm64-v8a"
 build-mode = "both"
@@ -75,7 +75,7 @@ patcher-args = "-e 'Settings for YouTube Music' -OrvxSettingsLabel='Prathxm Rvx'
 [Music-Custom]
 apkmirror-dlurl = "https://apkmirror.com/apk/google-inc/youtube-music/"
 uptodown-dlurl = "https://youtube-music.en.uptodown.com/android"
-archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.apps.youtube.music"
+# archive-dlurl = "https://archive.org/download/jhc-apks/apks/com.google.android.apps.youtube.music"
 app-name = "Music-Custom"
 arch = "arm64-v8a"
 build-mode = "both"
