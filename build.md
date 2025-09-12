@@ -1,4 +1,3 @@
-GooglePhotos: 7.43.0.800596475  
 Music-Custom: 8.30.54  
 Music-OG: 8.30.54  
 YouTube-Custom: 19.47.53  
@@ -11,9 +10,6 @@ Use [zygisk-detach](https://github.com/j-hc/zygisk-detach) to detach root ReVanc
 
 [Downlod From Website](https://mods.prathxm.in)
   
-Patches: anddea/patches-3.12.0.rvp  
-[Changelog](https://github.com/anddea/revanced-patches/releases/tag/v3.12.0)
-
 CLI: revanced/revanced-cli-5.0.1-all.jar  
-Patches: revanced/patches-5.34.0.rvp  
-[Changelog](https://github.com/revanced/revanced-patches/releases/tag/v5.34.0)  
+Patches: anddea/patches-3.13.0-dev.2.rvp  
+[Changelog](https://github.com/anddea/revanced-patches/releases/tag/v3.13.0-dev.2)  
